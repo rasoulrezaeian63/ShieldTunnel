@@ -242,6 +242,7 @@ Tor:
                            clients that cannot speak socks5 (off by default)
   --tor-bridge-file <path> read bridge lines from this file, one per line, the
                            same shape torrc uses; blank lines and # are skipped
+  --tor-exit <cc>          leave tor from an exit in this country, e.g. DE
   --tor-relays <what>      running tor relays from onionoo, used as plain
                            bridges: auto (default, alongside bridgedb), only,
                            off, or a count such as 80. bridgedb hands out a
@@ -405,6 +406,7 @@ Environment variables:
   AETHER_TOR_BIND                  --tor-bind
   AETHER_TOR_HTTP                  --tor-http
   AETHER_TOR_BRIDGE_FILE           --tor-bridge-file
+  AETHER_TOR_EXIT                  --tor-exit
   AETHER_TOR_RELAYS                --tor-relays
   AETHER_TOR_RELAY_PORTS           --tor-relay-ports
   AETHER_PSIPHON                   --psiphon (chain), --psiphon-reverse,
@@ -587,6 +589,7 @@ pub fn parse_args(args: Vec<String>) -> crate::error::Result<Parsed> {
             "--tor-bridge" => append("AETHER_TOR_BRIDGES", next_value!()),
             "--tor-bridges" => set("AETHER_TOR_BRIDGES", "auto"),
             "--tor-bridge-file" => set("AETHER_TOR_BRIDGE_FILE", next_value!()),
+            "--tor-exit" => set("AETHER_TOR_EXIT", next_value!()),
             "--tor-relays" => set("AETHER_TOR_RELAYS", next_value!()),
             "--tor-relay-ports" => set("AETHER_TOR_RELAY_PORTS", next_value!()),
             "--no-tor-bridges" => set("AETHER_TOR_BRIDGES", "off"),

@@ -54,7 +54,7 @@ tokio-boring = "5.3"
 flate2 = "1.1"
 brotli-decompressor = "5.0.0"
 zstd = { version = "0.14", default-features = false }
-arti-client = { version = "0.46", default-features = false, features = ["tokio", "rustls", "compression", "static-sqlite", "bridge-client", "pt-client"], optional = true }
+arti-client = { version = "0.46", default-features = false, features = ["tokio", "rustls", "compression", "static-sqlite", "bridge-client", "pt-client", "geoip"], optional = true }
 tor-chanmgr = { version = "0.46", optional = true }
 tor-rtcompat = { version = "0.46", default-features = false, features = ["tokio", "rustls"], optional = true }
 tokio-util = { version = "0.7", features = ["compat"], optional = true }

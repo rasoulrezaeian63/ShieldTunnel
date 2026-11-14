@@ -777,6 +777,23 @@ mod with_tor {
     }
 
     /// Binds Tor's http proxy when one is asked for, with --tor-http.
+    /// Stream preferences carrying the exit country from AETHER_TOR_EXIT (e.g. `de`), if any.
+    fn exit_prefs() -> arti_client::StreamPrefs {
+        let mut prefs = arti_client::StreamPrefs::new();
+        let told = std::env::var("AETHER_TOR_EXIT").unwrap_or_default();
+        let told = told.trim();
+        if !told.is_empty() {
+            match told.to_uppercase().parse::<arti_client::CountryCode>() {
+                Ok(code) => {
+                    log::info!("[*] tor: leaving from {}", told.to_uppercase());
+                    prefs.exit_country(code);
+                }
+                Err(_) => log::warn!("[!] tor: {told:?} is not a country code, any exit will do"),
+            }
+        }
+        prefs
+    }
+
     async fn bind_http() -> Result<Option<TcpListener>> {
         match http_listen_address() {
             Some(address) => Ok(Some(
@@ -792,11 +809,13 @@ mod with_tor {
         client: Client,
         kind: &'static str,
     ) -> Result<()> {
+        let prefs = exit_prefs();
         let connector = move |host: String, port: u16| {
             let client = client.clone();
+            let prefs = prefs.clone();
             async move {
                 client
-                    .connect((host.as_str(), port))
+                    .connect_with_prefs((host.as_str(), port), &prefs)
                     .await
                     .map(|stream| {
                         use tokio_util::compat::FuturesAsyncReadCompatExt;
