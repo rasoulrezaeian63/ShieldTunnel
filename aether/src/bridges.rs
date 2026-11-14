@@ -805,6 +805,80 @@ pub fn address_of(line: &str) -> Option<std::net::SocketAddr> {
     written.parse().ok()
 }
 
+/// The `url=` a webtunnel bridge line carries. The address written on the line is a
+/// placeholder, so only this URL says where the bridge really is.
+fn webtunnel_url(line: &str) -> Option<String> {
+    line.split_whitespace()
+        .find_map(|word| word.strip_prefix("url="))
+        .map(str::to_string)
+}
+
+/// A live webtunnel bridge answers HTTP 101 to a WebSocket upgrade on its `url=` path.
+async fn webtunnel_answers(line: &str) -> bool {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let Some(url) = webtunnel_url(line) else {
+        return true;
+    };
+    let (tls, rest) = match url.split_once("://") {
+        Some(("https", rest)) => (true, rest),
+        Some(("http", rest)) => (false, rest),
+        _ => return true,
+    };
+    let (authority, path) = match rest.find('/') {
+        Some(at) => (&rest[..at], &rest[at..]),
+        None => (rest, "/"),
+    };
+    let (host, port) = match authority.rsplit_once(':') {
+        Some((host, port)) if !host.ends_with(']') && port.parse::<u16>().is_ok() => {
+            (host, port.parse::<u16>().unwrap_or(443))
+        }
+        _ => (authority, if tls { 443 } else { 80 }),
+    };
+    let host = host.trim_matches(|c| c == '[' || c == ']').to_string();
+    if host.is_empty() {
+        return true;
+    }
+
+    let request = format!(
+        "GET {path} HTTP/1.1\r\nHost: {host}\r\nUser-Agent: Mozilla/5.0\r\n\
+         Connection: Upgrade\r\nUpgrade: websocket\r\n\
+         Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n"
+    );
+
+    let attempt = async {
+        let stream = crate::egress::tcp_connect_host(&host, port).await.ok()?;
+        let mut buffer = [0u8; 64];
+        let read = if tls {
+            let mut builder =
+                boring::ssl::SslConnector::builder(boring::ssl::SslMethod::tls()).ok()?;
+            builder.set_verify(boring::ssl::SslVerifyMode::NONE);
+            let mut config = builder.build().configure().ok()?;
+            config.set_verify_hostname(false);
+            let mut stream = tokio_boring::connect(config, &host, stream).await.ok()?;
+            stream.write_all(request.as_bytes()).await.ok()?;
+            stream.read(&mut buffer).await.ok()?
+        } else {
+            let mut stream = stream;
+            stream.write_all(request.as_bytes()).await.ok()?;
+            stream.read(&mut buffer).await.ok()?
+        };
+        let head = String::from_utf8_lossy(&buffer[..read]).to_string();
+        let mut parts = head.split_whitespace();
+        Some(
+            parts
+                .next()
+                .is_some_and(|v| v.to_ascii_uppercase().starts_with("HTTP/"))
+                && parts.next() == Some("101"),
+        )
+    };
+
+    matches!(
+        tokio::time::timeout(Duration::from_secs(5), attempt).await,
+        Ok(Some(true))
+    )
+}
+
 async fn answers(address: std::net::SocketAddr) -> bool {
     matches!(
         tokio::time::timeout(REACH_TIMEOUT, crate::egress::tcp_connect(address)).await,
@@ -832,14 +906,19 @@ pub async fn keep_reachable(
         return lines;
     }
 
-    let mut checks = Vec::new();
+    let mut checks: Vec<Option<std::pin::Pin<Box<dyn std::future::Future<Output = bool> + Send + '_>>>> =
+        Vec::new();
 
     for line in &lines {
+        if transport_of(line).as_deref() == Some("webtunnel") && webtunnel_url(line).is_some() {
+            checks.push(Some(Box::pin(webtunnel_answers(line))));
+            continue;
+        }
         let skip =
             transport_of(line).is_some_and(|protocol| UNTESTABLE.contains(&protocol.as_str()));
 
         match address_of(line).filter(|_| !skip) {
-            Some(address) => checks.push(Some(answers(address))),
+            Some(address) => checks.push(Some(Box::pin(answers(address)))),
             None => checks.push(None),
         }
     }
